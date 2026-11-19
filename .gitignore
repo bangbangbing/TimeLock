@@ -1,0 +1,6 @@
+.build/
+.build-x64/
+.build-arm/
+build/
+.DS_Store
+*.xcodeproj
