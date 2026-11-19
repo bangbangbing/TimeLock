@@ -25,8 +25,12 @@ cp "$BINARY" "$APP_DIR/Contents/MacOS/$APP_NAME"
 cp Info.plist "$APP_DIR/Contents/Info.plist"
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 
-echo "==> Ad-hoc code signing..."
-codesign --force --sign - "$APP_DIR"
+echo "==> Ad-hoc code signing (stable identifier, TCC 授权在重打包后仍有效)..."
+REQ_FILE="$(mktemp)"
+printf 'designated => identifier "com.zhougj.timelock"\n' > "$REQ_FILE"
+codesign --force --sign - --identifier com.zhougj.timelock \
+    --requirements "$REQ_FILE" "$APP_DIR"
+rm -f "$REQ_FILE"
 
 lipo -info "$APP_DIR/Contents/MacOS/$APP_NAME" || true
 echo "==> Done: $APP_DIR"

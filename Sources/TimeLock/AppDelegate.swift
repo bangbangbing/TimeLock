@@ -54,6 +54,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.runSmokeTest()
             }
         }
+
+        if ProcessInfo.processInfo.arguments.contains("--lock-test") {
+            let perform = ProcessInfo.processInfo.arguments.contains("--lock-test-go")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.runLockTest(perform: perform)
+            }
+        }
+    }
+
+    /// 锁屏诊断：打印辅助功能授权状态与候选工具情况；--lock-test-go 时实际触发锁屏链。
+    private func runLockTest(perform: Bool) {
+        print("LOCK_TEST \(SystemLock.diagnosticDescription())")
+        if perform {
+            let result = SystemLock.lockScreen()
+            print("LOCK_TEST result=\(result)")
+        } else {
+            print("LOCK_TEST dry-run（追加 --lock-test-go 可实际触发锁屏）")
+        }
+        fflush(stdout)
+        exit(0)
     }
 
     /// 自动化冒烟测试：触发覆盖层，验证窗口覆盖所有屏幕且层级正确。

@@ -153,8 +153,12 @@ final class PopoverPanelController: NSViewController {
         }
 
         let s = SettingsStore.shared.current
+        var lockInfo = ""
+        if s.autoLockAfterBreak {
+            lockInfo = SystemLock.accessibilityGranted ? "　真锁屏✅" : "　真锁屏⚠️未授权"
+        }
         footerLabel.stringValue = "开机自启：\(LaunchAtLogin.isEnabled ? "开" : "关")　"
-            + "锁屏后自动熄屏：\(s.autoLockAfterBreak ? "开" : "关")　"
+            + "锁屏后自动熄屏：\(s.autoLockAfterBreak ? "开" : "关")\(lockInfo)　"
             + "已完成：\(engine.completedCycles) 轮"
     }
 

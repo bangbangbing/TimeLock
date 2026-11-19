@@ -12,6 +12,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
     private let autoStartCheck = NSButton(checkboxWithTitle: "开机自启", target: nil, action: nil)
     private let autoLockCheck = NSButton(checkboxWithTitle: "锁屏完毕后自动熄屏锁定", target: nil, action: nil)
     private let explainLabel = NSTextField(wrappingLabelWithString: "")
+    private let lockPermissionLabel = NSTextField(wrappingLabelWithString: "")
     private let testButton = NSButton(title: "测试提醒", target: nil, action: nil)
     private let startStopButton = NSButton(title: "停止提醒", target: nil, action: nil)
     private var isRefreshing = false
@@ -20,7 +21,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         self.engine = engine
         super.init(window: nil)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -78,10 +79,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         autoStartCheck.action = #selector(autoStartToggled)
         autoLockCheck.action = #selector(autoLockToggled)
 
-        explainLabel.stringValue = "勾选「锁屏完毕后自动熄屏锁定」：锁屏倒计时结束后自动调用系统锁屏，"
+        explainLabel.stringValue = "勾选「锁屏完毕后自动熄屏锁定」：锁屏倒计时结束后自动触发系统级锁屏，"
             + "需输入密码解锁后继续提醒循环。不勾选：覆盖层自动消失，回到锁屏前状态并开始下一轮。"
         explainLabel.font = .systemFont(ofSize: 11)
         explainLabel.textColor = .secondaryLabelColor
+
+        lockPermissionLabel.font = .systemFont(ofSize: 11)
+        lockPermissionLabel.textColor = .secondaryLabelColor
 
         let sep = NSBox()
         sep.boxType = .separator
@@ -101,7 +105,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         let stack = NSStackView(views: [
             title, intervalLabel, intervalRow, lockLabel, lockRow,
             wordLabel, wordScroll, autoStartCheck, autoLockCheck,
-            explainLabel, sep, buttonRow
+            explainLabel, lockPermissionLabel, sep, buttonRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -122,7 +126,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
             stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
             wordScroll.widthAnchor.constraint(equalToConstant: 410),
             wordScroll.heightAnchor.constraint(equalToConstant: 90),
-            explainLabel.widthAnchor.constraint(equalToConstant: 410)
+            explainLabel.widthAnchor.constraint(equalToConstant: 410),
+            lockPermissionLabel.widthAnchor.constraint(equalToConstant: 410)
         ])
     }
 
@@ -146,6 +151,18 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate, N
         }
         autoStartCheck.state = LaunchAtLogin.isEnabled ? .on : .off
         autoLockCheck.state = s.autoLockAfterBreak ? .on : .off
+
+        let axGranted = SystemLock.accessibilityGranted
+        if s.autoLockAfterBreak {
+            lockPermissionLabel.stringValue = axGranted
+                ? "✅ 真锁屏已就绪：倒计时结束将直接进入系统锁屏，输入密码解锁后继续循环。"
+                : "⚠️ 未授予辅助功能权限：倒计时结束将仅熄屏（唤醒后无需密码）。请到 系统设置 › 隐私与安全性 › 辅助功能，添加并勾选 TimeLock。"
+            lockPermissionLabel.textColor = axGranted ? .systemGreen : .systemOrange
+        } else {
+            lockPermissionLabel.stringValue = "未勾选自动锁屏。"
+            lockPermissionLabel.textColor = .secondaryLabelColor
+        }
+
         startStopButton.title = (engine.phase == .idle) ? "启动提醒" : "停止提醒"
     }
 

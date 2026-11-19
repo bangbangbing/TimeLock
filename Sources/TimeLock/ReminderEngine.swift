@@ -20,6 +20,9 @@ final class ReminderEngine: NSObject {
     private var intervalTimer: Timer?
     private var nextReminderDate: Date?
     private var intervalSeconds = 0
+    /// 真锁屏触发后的确认看门狗：6 秒内 session 未失活则视为锁屏未生效，自愈重排。
+    private var lockWatchdogTimer: Timer?
+    private var lockPermissionNotified = false
 
     var statusText: String {
         switch phase {
@@ -62,6 +65,8 @@ final class ReminderEngine: NSObject {
         intervalTimer?.invalidate()
         intervalTimer = nil
         nextReminderDate = nil
+        lockWatchdogTimer?.invalidate()
+        lockWatchdogTimer = nil
         overlay.close(notifyCompletion: false)
         onStatusChange?()
     }
@@ -74,7 +79,13 @@ final class ReminderEngine: NSObject {
             let s = SettingsStore.shared.current
             overlay.show(word: s.reminderWord, duration: s.lockSeconds,
                          autoLockOnFinish: s.autoLockAfterBreak) { requested in
-                if requested { _ = SystemLock.lockScreen() }
+                guard requested else { return }
+                switch SystemLock.lockScreen() {
+                case .realLockTriggered:
+                    break // 预览场景：真锁屏生效与否由系统事件驱动，无需看门狗
+                case .displaySleepOnly(let reason), .failed(let reason):
+                    UserNotifier.post(title: "TimeLock 自动锁屏", body: reason)
+                }
             }
             onStatusChange?()
         }
@@ -95,6 +106,8 @@ final class ReminderEngine: NSObject {
 
     func pauseForSystem() {
         guard phase == .running || phase == .resting else { return }
+        lockWatchdogTimer?.invalidate()
+        lockWatchdogTimer = nil
         overlay.close(notifyCompletion: false)
         intervalTimer?.invalidate()
         intervalTimer = nil
@@ -140,18 +153,60 @@ final class ReminderEngine: NSObject {
             self.completedCycles += 1
             self.phase = .running
             if requested {
-                // 自动熄屏锁定；成功后 session 通知会触发 pause → 解锁后 resume 重排。
-                let locked = SystemLock.lockScreen()
-                if !locked {
-                    // 锁屏失败（无候选工具/未授权）则直接继续下一轮
-                    self.scheduleNextReminder()
-                }
+                self.beginSystemLock()
             } else {
                 self.scheduleNextReminder()
             }
             self.onStatusChange?()
         }
         onStatusChange?()
+    }
+
+    /// 倒计时结束后的自动锁屏流转。
+    /// - realLockTriggered：等待 session 失活（pause）→ 解锁后恢复（resume）重排；
+    ///   6 秒看门狗兜底，锁屏未生效则提示用户并直接继续下一轮。
+    /// - displaySleepOnly / failed：立即继续下一轮，并提示原因与授权方法。
+    private func beginSystemLock() {
+        let result = SystemLock.lockScreen()
+        switch result {
+        case .realLockTriggered:
+            startLockWatchdog()
+        case .displaySleepOnly(let reason):
+            notifyLockIssue(
+                title: "已熄屏，但未真正锁屏",
+                body: reason + "。如需真锁屏：系统设置 › 隐私与安全性 › 辅助功能，添加并勾选 TimeLock。",
+                once: true)
+            scheduleNextReminder()
+        case .failed(let reason):
+            notifyLockIssue(title: "自动锁屏失败", body: reason + " 本轮将继续下一轮提醒。")
+            scheduleNextReminder()
+        }
+        onStatusChange?()
+    }
+
+    /// 真锁屏看门狗：锁屏生效时 sessionDidResignActive 会把 phase 置为 .paused；
+    /// 若 6 秒后仍处于 .running 且未重排计时器，说明系统没有响应，自愈继续循环。
+    private func startLockWatchdog() {
+        lockWatchdogTimer?.invalidate()
+        let timer = Timer(timeInterval: 6, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.lockWatchdogTimer = nil
+            guard self.phase == .running, self.nextReminderDate == nil else { return }
+            self.notifyLockIssue(
+                title: "系统锁屏未生效",
+                body: "已尝试触发锁屏，但系统没有响应（快捷键可能被修改或权限被收回）。"
+                    + "请到 系统设置 › 隐私与安全性 › 辅助功能 检查 TimeLock 是否已勾选。本轮继续下一轮提醒。")
+            self.scheduleNextReminder()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        lockWatchdogTimer = timer
+    }
+
+    /// 锁屏异常的用户提示（once：每次运行只提示一次，避免轰炸）。
+    private func notifyLockIssue(title: String, body: String, once: Bool = false) {
+        if once && lockPermissionNotified { return }
+        lockPermissionNotified = true
+        UserNotifier.post(title: title, body: body)
     }
 
     static func format(_ seconds: Int) -> String {

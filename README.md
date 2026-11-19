@@ -14,11 +14,35 @@
   锁屏时长 5–3600 秒可调，期间无任何关闭入口（无按钮/无点击关闭/无快捷键退出）
 - **提醒词**：多行文本，锁屏画面居中大字显示；菜单栏面板内可直接快速编辑
 - **锁屏结束去向（设置中勾选）**：
-  - ✅ 勾选「锁屏完毕后自动熄屏锁定」→ 调用系统锁屏（CGSession -suspend → pmset displaysleepnow → osascript Ctrl+Cmd+Q 依次尝试），解锁后继续提醒循环
+  - ✅ 勾选「锁屏完毕后自动熄屏锁定」→ 触发系统级真锁屏（见下文「自动锁屏与辅助功能权限」），输入密码解锁后继续提醒循环；若 6 秒内未检测到锁屏生效，自动提示并继续下一轮
   - ⬜ 不勾选 → 覆盖层自动消失，回到锁屏前状态并开始下一轮
 - **开机自启**：macOS 13+ 用 SMAppService，旧版回退 LaunchAgents
 - **系统感知**：休眠/锁屏时自动暂停计时，唤醒后恢复；显示器增减时自动重建覆盖层
 - **单实例**：flock 文件锁，重复启动会唤起已运行实例
+
+## 自动锁屏与辅助功能权限
+
+勾选「锁屏完毕后自动熄屏锁定」后，应用按以下候选链触发锁屏：
+
+| 优先级 | 方式 | 条件 | 效果 |
+|--------|------|------|------|
+| 1 | `CGSession -suspend` | 旧版 macOS 存在该工具（macOS 26 已移除） | 真锁屏，无需授权 |
+| 2 | 模拟 `Control+Command+Q` 快捷键（CGEvent） | 已授予辅助功能权限 | 真锁屏 |
+| 3 | `pmset displaysleepnow` | 兜底 | **仅熄屏不锁屏**，并弹系统授权引导 |
+
+> **为什么需要辅助功能权限**：macOS 26 移除了 CGSession，现代 macOS 的程序化真锁屏
+> 只能通过模拟系统快捷键实现，这要求在
+> **系统设置 › 隐私与安全性 › 辅助功能** 中添加并勾选 TimeLock。
+> 未授权时只能熄屏保底（若系统未开启「退出睡眠后要求密码」，唤醒后不锁屏），
+> 应用会通过系统通知提示原因。
+
+- 查看当前权限状态：设置窗口勾选项下方有实时提示；菜单栏面板 footer 显示「真锁屏✅/⚠️未授权」
+- 命令行诊断（无副作用）：
+
+```bash
+/Applications/TimeLock.app/Contents/MacOS/TimeLock --lock-test       # 打印授权状态与候选工具
+/Applications/TimeLock.app/Contents/MacOS/TimeLock --lock-test-go    # 实际触发一次锁屏链
+```
 
 ## 构建
 
@@ -65,7 +89,8 @@ Sources/TimeLock/
 ├── PopoverPanelController.swift  # 菜单栏弹出面板（状态/进度/提醒词快速编辑）
 ├── SettingsWindowController.swift# 设置窗口（间隔/时长/提醒词/自启/自动熄屏）
 ├── SettingsStore.swift           # UserDefaults 设置存储
-├── SystemLock.swift              # 系统锁屏候选链
+├── SystemLock.swift              # 系统锁屏候选链（CGSession / CGEvent 快捷键 / pmset 兜底）
+├── UserNotifier.swift            # 系统通知（锁屏异常提示）
 └── LaunchAtLogin.swift           # 开机自启（SMAppService / LaunchAgents）
 ```
 
@@ -74,9 +99,8 @@ Sources/TimeLock/
 - 纯 AppKit（非 SwiftUI-only API），macOS 10.15+ 可编译运行
 - `make_app.sh` 产出 fat binary；arm64 构建失败时自动回退 Intel-only
 - 新 API（SF Symbols / SMAppService / activate()）均带 `#available` 降级路径
-- 真锁屏说明：macOS 26 已移除 CGSession 工具，此环境默认走 `pmset displaysleepnow`
-  （若系统开启「退出睡眠后需要密码」即等效锁屏）；`osascript` 方案需在
-  系统设置 › 隐私与安全性 › 辅助功能 中授权
+- `.app` 以固定 designated requirement（`identifier "com.zhougj.timelock"`）做 ad-hoc 签名，
+  重新打包后已授予的辅助功能权限仍然有效
 
 ## 后续可扩展（V1.5）
 
