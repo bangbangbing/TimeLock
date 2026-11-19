@@ -42,6 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             self?.panelController?.refresh()
+            // 设置窗口打开时同步刷新（辅助功能授权回来后权限提示自动更新）
+            if let settingsWindow = self?.settingsController?.window, settingsWindow.isVisible {
+                self?.settingsController?.refreshFromStore()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         statusTimer = timer
